@@ -36,9 +36,9 @@ all: count tests
 count:
 	@echo Running $(words $(TEST_LIST)) tests
 
-tests: $(BUILD_DIR) $(HARDWARE_DIR) virtualenv $(TEST_CONFIG) $(TEST_LIST)
+tests: "$(BUILD_DIR)" "$(HARDWARE_DIR)" virtualenv $(TEST_CONFIG) $(TEST_LIST)
 
-$(TEST_LIST): LOCAL_BUILD_DIR=$(BUILD_DIR)/$(notdir $@)
+$(TEST_LIST): LOCAL_BUILD_DIR="$(BUILD_DIR)/$(notdir $@)"
 
 $(TEST_LIST):
 	$(SILENT)mkdir -p $(LOCAL_BUILD_DIR)
@@ -49,7 +49,7 @@ ifneq ("$(NO_BUILD)","1")
 		-core-api-version="10608" \
 		-warnings=none \
 		$(BUILDER_DEBUG_FLAG) \
-		-build-path "$(LOCAL_BUILD_DIR)" \
+		-build-path $(LOCAL_BUILD_DIR) \
 		-tools "$(ARDUINO_IDE_PATH)/tools-builder" \
 		-hardware "$(HARDWARE_DIR)"\
 		-hardware "$(ARDUINO_IDE_PATH)/hardware" \
@@ -76,18 +76,18 @@ ifneq ("$(NO_RUN)","1")
 endif
 
 $(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+	mkdir -p "$(BUILD_DIR)"
 
 $(HARDWARE_DIR):
-	mkdir -p $(HARDWARE_DIR)/esp8266com
-	cd $(HARDWARE_DIR)/esp8266com && ln -s $(realpath $(ESP8266_CORE_PATH)) esp8266
+	mkdir -p "$(HARDWARE_DIR)/esp8266com"
+	cd "$(HARDWARE_DIR)/esp8266com" && ln -s "$(realpath $(ESP8266_CORE_PATH))" esp8266
 
 virtualenv:
-	make -C $(BS_DIR) virtualenv
+	make -C "$(BS_DIR)" virtualenv
 
 clean:
-	rm -rf $(BUILD_DIR)
-	rm -rf $(HARDWARE_DIR)
+	rm -rf "$(BUILD_DIR)"
+	rm -rf "$(HARDWARE_DIR)"
 
 $(TEST_CONFIG):
 	@echo "******    "
@@ -96,4 +96,4 @@ $(TEST_CONFIG):
 	@echo "******    "
 	false
 
-.PHONY: tests all count venv $(BUILD_DIR) $(TEST_LIST)
+.PHONY: tests all count venv "$(BUILD_DIR)" $(TEST_LIST)
