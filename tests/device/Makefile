@@ -49,10 +49,10 @@ ifneq ("$(NO_BUILD)","1")
 		-core-api-version="10608" \
 		-warnings=none \
 		$(BUILDER_DEBUG_FLAG) \
-		-build-path $(LOCAL_BUILD_DIR) \
-		-tools $(ARDUINO_IDE_PATH)/tools-builder \
-		-hardware $(HARDWARE_DIR)\
-		-hardware $(ARDUINO_IDE_PATH)/hardware \
+		-build-path "$(LOCAL_BUILD_DIR)" \
+		-tools "$(ARDUINO_IDE_PATH)/tools-builder" \
+		-hardware "$(HARDWARE_DIR)"\
+		-hardware "$(ARDUINO_IDE_PATH)/hardware" \
 		-fqbn=$(FQBN) \
 		$@
 endif
@@ -61,17 +61,17 @@ ifneq ("$(NO_UPLOAD)","1")
 		-cp $(UPLOAD_PORT) \
 		-cb $(UPLOAD_BAUD) \
 		-cd $(UPLOAD_BOARD) \
-		-cf $(LOCAL_BUILD_DIR)/$(notdir $@).bin
+		-cf "$(LOCAL_BUILD_DIR)/$(notdir $@).bin"
 endif
 ifneq ("$(NO_RUN)","1")
 	@echo Running tests
 	$(SILENT)$(ESPTOOL) $(UPLOAD_VERBOSE_FLAG) -cp $(UPLOAD_PORT) -cd $(UPLOAD_BOARD) -cr
-	@source $(BS_DIR)/virtualenv/bin/activate && \
-		python $(BS_DIR)/runner.py \
+	@source "$(BS_DIR)/virtualenv/bin/activate" && \
+		python "$(BS_DIR)/runner.py" \
 			$(RUNNER_DEBUG_FLAG) \
 			-p $(UPLOAD_PORT) \
-			-n $(basename $(notdir $@)) \
-			-o $(LOCAL_BUILD_DIR)/test_result.xml \
+			-n "$(basename $(notdir $@))" \
+			-o "$(LOCAL_BUILD_DIR)/test_result.xml" \
 			`test -f $(addsuffix .py, $(basename $@)) && echo "-m $(addsuffix .py, $(basename $@))" || echo ""`
 endif
 
@@ -96,4 +96,4 @@ $(TEST_CONFIG):
 	@echo "******    "
 	false
 
-.PHONY: tests all count venv $(BUILD_DIR) $(TEST_LIST) 
+.PHONY: tests all count venv $(BUILD_DIR) $(TEST_LIST)
