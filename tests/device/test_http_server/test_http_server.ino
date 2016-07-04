@@ -45,6 +45,7 @@ TEST_CASE("HTTP GET Parameters", "[HTTPServer]")
         uint32_t startTime = millis();
         while(siteHits == 0 && (millis() - startTime) < 10000)
             server.handleClient();
+        Serial.printf("Test 1: hits: %u, data: %s\n", siteHits, siteData.c_str());
         REQUIRE(siteHits > 0 && siteData.equals("var1=val with spaces&var+=some%"));
     }
 }
@@ -66,6 +67,7 @@ TEST_CASE("HTTP POST Parameters", "[HTTPServer]")
         uint32_t startTime = millis();
         while(siteHits == 0 && (millis() - startTime) < 10000)
             server.handleClient();
+        Serial.printf("Test 2: hits: %u, data: %s\n", siteHits, siteData.c_str());
         REQUIRE(siteHits > 0 && siteData.equals("var2=val with spaces"));
     }
 }
@@ -87,6 +89,7 @@ TEST_CASE("HTTP GET+POST Parameters", "[HTTPServer]")
         uint32_t startTime = millis();
         while(siteHits == 0 && (millis() - startTime) < 10000)
             server.handleClient();
+        Serial.printf("Test 3: hits: %u, data: %s\n", siteHits, siteData.c_str());
         REQUIRE(siteHits > 0 && siteData.equals("var3=val with spaces&var+=some%"));
     }
 }
@@ -116,6 +119,7 @@ TEST_CASE("HTTP Upload", "[HTTPServer]")
         uint32_t startTime = millis();
         while(siteHits == 0 && (millis() - startTime) < 10000)
             server.handleClient();
+        Serial.printf("Test 4: hits: %u, data: %s\n", siteHits, siteData.c_str());
         REQUIRE(siteHits > 0 && siteData.equals("test.txt:16&var4=val with spaces"));
     }
 }
