@@ -12,7 +12,6 @@ static ESP8266WebServer server(80);
 static uint32_t siteHits = 0;
 static String siteData = "";
 
-
 void setup()
 {
     Serial.begin(115200);
