@@ -86,6 +86,7 @@ void hspi_slave_begin(uint8_t status_len, void * arg)
     pinMode(MISO, SPECIAL);
     pinMode(MOSI, SPECIAL);
 
+    SPI1C2 = (SPI1C2 & ~(SPIC2MISODM << SPIC2MISODM_S)) | (1 << SPIC2MISODM_S);
     SPI1S = SPISE | SPISBE | 0x3E0;
     SPI1U = SPIUMISOH | SPIUCOMMAND | SPIUSSE;
     SPI1CLK = 0;
