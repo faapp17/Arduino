@@ -289,6 +289,18 @@ EXP_FUNC int STDCALL ssl_read(SSL *ssl, uint8_t **in_data);
  */
 EXP_FUNC int STDCALL ssl_write(SSL *ssl, const uint8_t *out_data, int out_len);
 
+/* You can use detect for this define to know that the method below is available */
+#define AXTLS_2_0_0_SNDBUF 1
+
+/**
+ * @brief Calculate the size of the encrypted data from what you are about to send 
+ * @param ssl [in] An SSL obect reference.
+ * @param out_len [in] The number of bytes to be written.
+ * @return The number of bytes that will be sent, or if < 0 if an error.
+ * @see ssl.h for the error code list.
+ */
+EXP_FUNC int STDCALL ssl_calculate_write_length(SSL *ssl, int out_len);
+
 /**
  * @brief Find an ssl object based on a file descriptor.
  *
