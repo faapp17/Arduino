@@ -101,6 +101,15 @@ icmp_input(struct pbuf *p, struct netif *inp)
   code = *(((u8_t *)p->payload)+1);
 #endif /* LWIP_DEBUG */
   switch (type) {
+  case ICMP_DUR:
+    struct icmp_echo_hdr * fh = (struct icmp_echo_hdr *)p->payload;
+    if(fh->code == 4){
+      //Fragmentation Needed
+      u16_t next_hop_mtu = fh->seqno;
+      //need to connect the icmp packet to the appropriate tcp_pcb
+	  ets_printf("icmp_input: fragmentation needed. next hop mtu = %u\n", next_hop_mtu);
+    }
+    break;
   case ICMP_ER:
     /* This is OK, echo reply might have been parsed by a raw PCB
        (as obviously, an echo request has been sent, too). */
