@@ -82,6 +82,7 @@ static const char mem_debug_file[] ICACHE_RODATA_ATTR = __FILE__;
 
 /* Forward declarations.*/
 static void tcp_output_segment(struct tcp_seg *seg, struct tcp_pcb *pcb);
+static err_t tcp_split_unsent_seg(struct tcp_pcb *pcb, u16_t split);
 
 /** Allocate a pbuf and create a tcphdr at p->payload, used for output
  * functions other than the default tcp_output -> tcp_output_segment
@@ -952,6 +953,26 @@ tcp_output(struct tcp_pcb *pcb)
                  ntohl(seg->tcphdr->seqno), pcb->lastack));
   }
 #endif /* TCP_CWND_DEBUG */
+  /* Check if we need to split up the current segment to fully consume the send
+   * window and engage zero window probing. This is necessary under the following
+   * conditions and should not be done every time we send a full window's worth of
+   * data (due to pbuf split performance penatly):
+   *   1) The sending window (not the congrestion window) is non-zero but doesn't
+   *      have enough space to send the entire segment
+   *   2) There is no data in flight.  When data is inflight, the RTO mechanism
+   *      will end up probing the window. This is also why the check only needs to
+   *      be done before the while loop
+   */
+  if (seg != NULL &&
+      lwip_ntohl(seg->tcphdr->seqno) - pcb->lastack + seg->len > wnd &&
+      wnd > 0 && wnd == pcb->snd_wnd && pcb->unacked == NULL) {
+    err_t err = tcp_split_unsent_seg(pcb, (u16_t)(wnd - (ntohl(seg->tcphdr->seqno) - pcb->lastack)));
+    if (err != ERR_OK) {
+      /* segment could not split */
+      pcb->flags |= TF_NAGLEMEMERR;
+      return err;
+    }
+  }
   /* data available and window allows it to be sent? 
     *��ǰ��Ч�������?�ķ��ͣ�ѭ�����ͱ��ģ�ֱ�������*/
   while (seg != NULL &&
@@ -1521,5 +1542,164 @@ tcp_zero_window_probe(struct tcp_pcb *pcb)
   LWIP_DEBUGF(TCP_DEBUG, ("tcp_zero_window_probe: seqno %"U32_F
                           " ackno %"U32_F".\n",
                           pcb->snd_nxt - 1, pcb->rcv_nxt));
+}
+/**
+ * Split segment on the head of the unsent queue.  If return is not
+ * ERR_OK, existing head remains intact
+ *
+ * The split is accomplished by creating a new TCP segment and pbuf
+ * which holds the remainder payload after the split.  The original
+ * pbuf is trimmed to new length.  This allows splitting of read-only
+ * pbufs
+ *
+ * @param pcb the tcp_pcb for which to split the unsent head
+ * @param split the amount of payload to remain in the head
+ */
+static err_t
+tcp_split_unsent_seg(struct tcp_pcb *pcb, u16_t split)
+{
+  struct tcp_seg *seg = NULL, *useg = NULL;
+  struct pbuf *p = NULL;
+  u8_t optlen;
+  u8_t optflags;
+  u8_t split_flags;
+  u8_t remainder_flags;
+  u16_t remainder;
+  u16_t offset;
+#if TCP_CHECKSUM_ON_COPY
+  u16_t chksum = 0;
+  u8_t chksum_swapped = 0;
+  struct pbuf *q;
+#endif /* TCP_CHECKSUM_ON_COPY */
+
+  useg = pcb->unsent;
+  if (useg == NULL) {
+    return ERR_MEM;
+  }
+
+  if (split == 0) {
+    LWIP_ASSERT("Can't split segment into length 0", 0);
+    return ERR_VAL;
+  }
+
+  if (useg->len <= split) {
+    return ERR_OK;
+  }
+
+  LWIP_ASSERT("split <= mss", split <= pcb->mss);
+  LWIP_ASSERT("useg->len > 0", useg->len > 0);
+
+  /* We should check that we don't exceed TCP_SND_QUEUELEN but we need
+   * to split this packet so we may actually exceed the max value by
+   * one!
+   */
+  LWIP_DEBUGF(TCP_QLEN_DEBUG, ("tcp_enqueue: split_unsent_seg: %u\n", (unsigned int)pcb->snd_queuelen));
+
+  optflags = useg->flags;
+#if TCP_CHECKSUM_ON_COPY
+  /* Remove since checksum is not stored until after tcp_create_segment() */
+  optflags &= ~TF_SEG_DATA_CHECKSUMMED;
+#endif /* TCP_CHECKSUM_ON_COPY */
+  optlen = LWIP_TCP_OPT_LENGTH(optflags);
+  remainder = useg->len - split;
+
+  /* Create new pbuf for the remainder of the split */
+  p = pbuf_alloc(PBUF_TRANSPORT, remainder + optlen, PBUF_RAM);
+  if (p == NULL) {
+    LWIP_DEBUGF(TCP_OUTPUT_DEBUG | LWIP_DBG_LEVEL_SERIOUS,
+            ("tcp_split_unsent_seg: could not allocate memory for pbuf remainder %u\n", remainder));
+    goto memerr;
+  }
+
+  /* Offset into the original pbuf is past TCP/IP headers, options, and split amount */
+  offset = useg->p->tot_len - useg->len + split;
+  /* Copy remainder into new pbuf, headers and options will not be filled out */
+  if (pbuf_copy_partial(useg->p, (u8_t*)p->payload + optlen, remainder, offset ) != remainder) {
+    LWIP_DEBUGF(TCP_OUTPUT_DEBUG | LWIP_DBG_LEVEL_SERIOUS,
+            ("tcp_split_unsent_seg: could not copy pbuf remainder %u\n", remainder));
+    goto memerr;
+  }
+#if TCP_CHECKSUM_ON_COPY
+  /* calculate the checksum on remainder data */
+  tcp_seg_add_chksum(~inet_chksum((const u8_t*)p->payload + optlen, remainder), remainder,
+          &chksum, &chksum_swapped);
+#endif /* TCP_CHECKSUM_ON_COPY */
+
+  /* Options are created when calling tcp_output() */
+
+  /* Migrate flags from original segment */
+  split_flags = TCPH_FLAGS(useg->tcphdr);
+  remainder_flags = 0; /* ACK added in tcp_output() */
+
+  if (split_flags & TCP_PSH) {
+    split_flags &= ~TCP_PSH;
+    remainder_flags |= TCP_PSH;
+  }
+  if (split_flags & TCP_FIN) {
+    split_flags &= ~TCP_FIN;
+    remainder |= TCP_FIN;
+  }
+  /* SYN should be left on split, RST should not be present with data */
+
+  seg = tcp_create_segment(pcb, p, remainder_flags, lwip_ntohl(useg->tcphdr->seqno) + split, optflags);
+  if (seg == NULL) {
+    LWIP_DEBUGF(TCP_OUTPUT_DEBUG | LWIP_DBG_LEVEL_SERIOUS,
+            ("tcp_split_unsent_seg: could not create new TCP segment\n"));
+    goto memerr;
+  }
+
+#if TCP_CHECKSUM_ON_COPY
+  seg->chksum = chksum;
+  seg->chksum_swapped = chksum_swapped;
+  seg->flags |= TF_SEG_DATA_CHECKSUMMED;
+#endif /* TCP_CHECKSUM_ON_COPY */
+
+  /* Trim the original pbuf into our split size.  At this point our remainder segment must be setup
+  successfully because we are modifying the original segment */
+  pbuf_realloc(useg->p, useg->p->tot_len - remainder);
+  useg->len -= remainder;
+  TCPH_SET_FLAG(useg->tcphdr, split_flags);
+
+#if TCP_CHECKSUM_ON_COPY
+  /* The checksum on the split segment is now incorrect. We need to re-run it over the split */
+  useg->chksum = 0;
+  useg->chksum_swapped = 0;
+  q = useg->p;
+  offset = q->tot_len - useg->len; /* Offset due to exposed headers */
+
+  /* Advance to the pbuf where the offset ends */
+  while (q != NULL && offset > q->len) {
+    offset -= q->len;
+    q = q->next;
+  }
+  LWIP_ASSERT("Found start of payload pbuf", q != NULL);
+  /* Checksum the first payload pbuf accounting for offset, then other pbufs are all payload */
+  for (; q != NULL; offset = 0, q = q->next) {
+    tcp_seg_add_chksum(~inet_chksum((const u8_t*)q->payload + offset, q->len - offset), q->len - offset,
+          &useg->chksum, &useg->chksum_swapped);
+  }
+#endif /* TCP_CHECKSUM_ON_COPY */
+
+  /* Update number of segments on the queues. Note that length now may
+   * exceed TCP_SND_QUEUELEN! We don't have to touch pcb->snd_buf
+   * because the total amount of data is constant when packet is split */
+  pcb->snd_queuelen++;
+
+  /* Finally insert remainder into queue after split (which stays head) */
+  seg->next = useg->next;
+  useg->next = seg;
+
+  return ERR_OK;
+memerr:
+  TCP_STATS_INC(tcp.memerr);
+
+  if (seg != NULL) {
+    tcp_segs_free(seg);
+  }
+  if (p != NULL) {
+    pbuf_free(p);
+  }
+
+  return ERR_MEM;
 }
 #endif /* LWIP_TCP */
